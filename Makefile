@@ -11,6 +11,7 @@ build:
 
 cp_binary:
 	cp target/${TARGET}/debug/micro_os.efi ${EFI}
+
 run:
 	qemu-system-x86_64 -bios third-party/ovmf/RELEASEX64_OVMF.fd -drive format=raw,file=fat:rw:mnt
 
