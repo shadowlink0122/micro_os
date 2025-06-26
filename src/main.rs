@@ -81,6 +81,7 @@ struct EfiGraphicsOutputProtocol<'a> {
     reserved: [u64; 3],
     pub mode: &'a EfiGraphicsOutputProtocolMode<'a>,
 }
+
 fn locate_graphic_protocol<'a>(
     efi_system_table: &EfiSystemtable,
 ) -> Result<&'a EfiGraphicsOutputProtocol<'a>> {
@@ -96,6 +97,11 @@ fn locate_graphic_protocol<'a>(
     Ok(unsafe { &*graphic_output_protocol })
 }
 
+use core::arch::asm;
+fn hlt() {
+    unsafe { asm!("hlt") }
+}
+
 #[no_mangle]
 fn efi_main(_image_handle: EfiHandle, efi_system_table: &EfiSystemtable) {
     let efi_graphic_output_protocol = locate_graphic_protocol(efi_system_table).unwrap();
@@ -108,10 +114,14 @@ fn efi_main(_image_handle: EfiHandle, efi_system_table: &EfiSystemtable) {
     for e in vram {
         *e = 0xffffff;
     }
-    loop {}
+    loop {
+        hlt();
+    }
 }
 
 #[panic_handler]
 fn panic(_panic: &PanicInfo<'_>) -> ! {
-    loop {}
+    loop {
+        hlt();
+    }
 }
