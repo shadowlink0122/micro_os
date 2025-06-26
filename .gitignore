@@ -1,2 +1,5 @@
+/cpp/*.o
+/cpp/*.efi
 /mnt
 /target
+/edk2

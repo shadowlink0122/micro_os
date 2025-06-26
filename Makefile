@@ -1,22 +1,31 @@
+COMPILE_IMAGE=micro_os.efi
 EFIDIR=mnt/EFI/BOOT
 EFI=${EFIDIR}/BOOTX64.EFI
 TARGET=x86_64-unknown-uefi
 
-default: all
+default: rust run
 init:
-	mkdir -p ${EFIDIR}
+	mkdir -p ${EFI}
 
-build:
+clean:
+	rm -rf ${EFI} cpp/${COMPILE_IMAGE} cpp/main.o
+
+# build rust code
+.PHONY: rust
+rust:
 	cargo build --target ${TARGET}
+	rm -rf ${EFI}
+	cp target/${TARGET}/debug/${COMPILE_IMAGE} ${EFI}
 
-cp_binary:
-	cp target/${TARGET}/debug/micro_os.efi ${EFI}
+# build cpp code
+.PHONY: cpp
+cpp:
+	cd cpp && clang -target x86_64-pc-win32-coff -mno-red-zone -fno-stack-protector \
+		-fshort-wchar -Wall -c main.cpp
+	cd cpp && lld-link /subsystem:efi_application /entry:EfiMain /out:${COMPILE_IMAGE} main.o
+	rm -rf ${EFI}
+	cp cpp/${COMPILE_IMAGE} ${EFI}
 
+# run efi image on qemu
 run:
-	qemu-system-x86_64 -bios third-party/ovmf/RELEASEX64_OVMF.fd -drive format=raw,file=fat:rw:mnt
-
-# build, copy, run
-all:
-	cargo build --target ${TARGET}
-	cp target/${TARGET}/debug/micro_os.efi ${EFI}
 	qemu-system-x86_64 -bios third-party/ovmf/RELEASEX64_OVMF.fd -drive format=raw,file=fat:rw:mnt
