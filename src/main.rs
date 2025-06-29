@@ -2,126 +2,61 @@
 #![no_main]
 #![feature(offset_of)]
 
-use core::mem::offset_of;
-use core::mem::size_of;
+use core::fmt::Write;
 use core::panic::PanicInfo;
-use core::ptr::null_mut;
-use core::slice;
+use core::writeln;
 
-type EfiVoid = u8;
-type EfiHandle = u64;
-type Result<T> = core::result::Result<T, &'static str>;
-
-#[repr(C)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct EfiGuid {
-    pub data0: u32,
-    pub data1: u16,
-    pub data2: u16,
-    pub data3: [u8; 8],
-}
-
-const EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID: EfiGuid = EfiGuid {
-    data0: 0x9042a9de,
-    data1: 0x23dc,
-    data2: 0x4a38,
-    data3: [0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a],
-};
-
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-#[must_use]
-#[repr(u64)]
-enum EfiStatus {
-    Success = 0,
-}
-
-#[repr(C)]
-struct EfiBootServiciestable {
-    _reserved0: [u64; 40],
-    locate_protocol: extern "win64" fn(
-        protocol: *const EfiGuid,
-        registration: *const EfiVoid,
-        interface: *mut *mut EfiVoid,
-    ) -> EfiStatus,
-}
-const _: () = assert!(offset_of!(EfiBootServiciestable, locate_protocol) == 320);
-
-#[repr(C)]
-struct EfiSystemtable {
-    _reserved0: [u64; 12],
-    pub boot_servicies: &'static EfiBootServiciestable,
-}
-const _: () = assert!(offset_of!(EfiSystemtable, boot_servicies) == 96);
-
-#[repr(C)]
-#[derive(Debug)]
-struct EfiGraphicsOutputProtocolPixelInfo {
-    version: u32,
-    pub horizontal_resolution: u32,
-    pub vertial_resolution: u32,
-    _padding0: [u32; 5],
-    pub pixels_per_scan_line: u32,
-}
-const _: () = assert!(size_of::<EfiGraphicsOutputProtocolPixelInfo>() == 36);
-
-#[repr(C)]
-#[derive(Debug)]
-struct EfiGraphicsOutputProtocolMode<'a> {
-    pub mac_mode: u32,
-    pub mode: u32,
-    pub info: &'a EfiGraphicsOutputProtocolPixelInfo,
-    pub size_of_info: u64,
-    pub frame_buffer_base: usize,
-    pub frame_buffer_size: usize,
-}
-
-#[repr(C)]
-#[derive(Debug)]
-struct EfiGraphicsOutputProtocol<'a> {
-    reserved: [u64; 3],
-    pub mode: &'a EfiGraphicsOutputProtocolMode<'a>,
-}
-
-fn locate_graphic_protocol<'a>(
-    efi_system_table: &EfiSystemtable,
-) -> Result<&'a EfiGraphicsOutputProtocol<'a>> {
-    let mut graphic_output_protocol = null_mut::<EfiGraphicsOutputProtocol>();
-    let status = (efi_system_table.boot_servicies.locate_protocol)(
-        &EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID,
-        null_mut::<EfiVoid>(),
-        &mut graphic_output_protocol as *mut *mut EfiGraphicsOutputProtocol as *mut *mut EfiVoid,
-    );
-    if status != EfiStatus::Success {
-        return Err("Failed to locate graphics output protocol");
-    }
-    Ok(unsafe { &*graphic_output_protocol })
-}
-
-use core::arch::asm;
-fn hlt() {
-    unsafe { asm!("hlt") }
-}
+use micro_os::graphics::fill_rect;
+use micro_os::graphics::Bitmap;
+use micro_os::qemu::exit_qemu;
+use micro_os::qemu::QemuExitCode;
+use micro_os::uefi::exit_from_efi_services;
+use micro_os::uefi::init_vram;
+use micro_os::uefi::EfiHandle;
+use micro_os::uefi::EfiMemoryType;
+use micro_os::uefi::EfiSystemTable;
+use micro_os::uefi::MemoryMapHolder;
+use micro_os::uefi::VramTextWriter;
+use micro_os::x86::hlt;
 
 #[no_mangle]
-fn efi_main(_image_handle: EfiHandle, efi_system_table: &EfiSystemtable) {
-    let efi_graphic_output_protocol = locate_graphic_protocol(efi_system_table).unwrap();
-    let vram_addr = efi_graphic_output_protocol.mode.frame_buffer_base;
-    let vram_byte_size = efi_graphic_output_protocol.mode.frame_buffer_size;
-    let vram = unsafe {
-        slice::from_raw_parts_mut(vram_addr as *mut u32, vram_byte_size / size_of::<u32>())
-    };
+fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
+    let mut vram = init_vram(efi_system_table).expect("init_vra, failed");
 
-    for e in vram {
-        *e = 0xffffff;
+    let vw = vram.width();
+    let vh = vram.height();
+    fill_rect(&mut vram, 0x0000ff, 0, 0, vw, vh).expect("fill_rect failed");
+
+    let mut w = VramTextWriter::new(&mut vram);
+    let mut memory_map = MemoryMapHolder::new();
+
+    let status = efi_system_table
+        .boot_servicies()
+        .get_memory_map(&mut memory_map);
+    writeln!(w, "{status:?}").unwrap();
+    let mut total_memory_pages = 0;
+    for e in memory_map.iter() {
+        if e.memory_type() != EfiMemoryType::CONVENTIONAL_MEMORY {
+            continue;
+        }
+        total_memory_pages += e.number_of_pages();
+        writeln!(w, "{e:?}").unwrap();
     }
+    let total_memory_size_mib = total_memory_pages * 4096 / 1024 / 1024;
+    writeln!(
+        w,
+        "Total: {total_memory_pages} pages = {total_memory_size_mib}MiB"
+    )
+    .unwrap();
+
+    exit_from_efi_services(image_handle, efi_system_table, &mut memory_map);
+    writeln!(w, "Hello, Non-UEFI World!").unwrap();
     loop {
         hlt();
     }
 }
 
 #[panic_handler]
-fn panic(_panic: &PanicInfo<'_>) -> ! {
-    loop {
-        hlt();
-    }
+fn panic(_info: &PanicInfo) -> ! {
+    exit_qemu(QemuExitCode::Fail);
 }

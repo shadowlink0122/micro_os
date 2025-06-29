@@ -26,6 +26,17 @@ cpp:
 	rm -rf ${EFI}
 	cp cpp/${COMPILE_IMAGE} ${EFI}
 
+.PHONY: test
+test: test_rust
+
+.PHONY: test_rust
+test_rust:
+	cargo test
+
+test_cpp:
+	:
+
 # run efi image on qemu
 run:
-	qemu-system-x86_64 -bios third-party/ovmf/RELEASEX64_OVMF.fd -drive format=raw,file=fat:rw:mnt
+	qemu-system-x86_64 -m 2G -bios third-party/ovmf/RELEASEX64_OVMF.fd -drive format=raw,file=fat:rw:mnt \
+		-device isa-debug-exit,iobase=0xf4,iosize=0x01
