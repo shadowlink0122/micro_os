@@ -10,6 +10,7 @@ use core::marker::PhantomData;
 use core::mem::offset_of;
 use core::mem::size_of;
 use core::mem::size_of_val;
+use core::mem::MaybeUninit;
 use core::pin::Pin;
 
 pub fn hlt() {
@@ -45,12 +46,6 @@ pub fn read_cr3() -> *mut PML4 {
     unsafe { asm!("mov rax, cr3", out("rax") cr3) }
     cr3
 }
-
-// pub fn read_cr3() -> *mut RootPageTable {
-//     let mut cr3: *mut RootPageTable;
-//     unsafe { asm!("mov rax, cr3", out("rax") cr3) }
-//     cr3
-// }
 
 pub type RootPageTable = [u8; 1024];
 
@@ -115,6 +110,37 @@ impl<const LEVEL: usize, const SHIFT: usize, NEXT> Entry<LEVEL, SHIFT, NEXT> {
             Err("Page Not Found")
         }
     }
+    fn table_mut(&mut self) -> Result<&mut NEXT> {
+        if self.is_present() {
+            Ok(unsafe { &mut *((self.value & !ATTR_MASK) as *mut NEXT) })
+        } else {
+            Err("Page Not Found")
+        }
+    }
+    fn set_page(&mut self, phys: u64, attr: PageAttr) -> Result<()> {
+        if phys & ATTR_MASK != 0 {
+            Err("phys is not aligned")
+        } else {
+            self.value = phys | attr as u64;
+            Ok(())
+        }
+    }
+    fn populate(&mut self) -> Result<&mut Self> {
+        if self.is_present() {
+            Err("Page is already populated")
+        } else {
+            let next: Box<NEXT> = Box::new(unsafe { MaybeUninit::zeroed().assume_init() });
+            self.value = Box::into_raw(next) as u64 | PageAttr::ReadWriteKernel as u64;
+            Ok(self)
+        }
+    }
+    fn ensure_populated(&mut self) -> Result<&mut Self> {
+        if self.is_present() {
+            Ok(self)
+        } else {
+            self.populate()
+        }
+    }
 }
 
 impl<const LEVEL: usize, const SHIFT: usize, NEXT> fmt::Display for Entry<LEVEL, SHIFT, NEXT> {
@@ -148,6 +174,9 @@ impl<const LEVEL: usize, const SHIFT: usize, NEXT: core::fmt::Debug> Table<LEVEL
     pub fn next_level(&self, index: usize) -> Option<&NEXT> {
         self.entry.get(index).and_then(|e| e.table().ok())
     }
+    fn calc_index(&self, addr: u64) -> usize {
+        ((addr >> SHIFT) & 0b1_1111_1111) as usize
+    }
 }
 
 impl<const LEVEL: usize, const SHIFT: usize, NEXT: fmt::Debug> fmt::Debug
@@ -162,6 +191,44 @@ pub type PT = Table<1, 12, [u8; PAGE_SIZE]>;
 pub type PD = Table<2, 21, PT>;
 pub type PDPT = Table<3, 30, PD>;
 pub type PML4 = Table<4, 39, PDPT>;
+
+impl PML4 {
+    pub fn new() -> Box<Self> {
+        Box::new(Self::default())
+    }
+    fn default() -> Self {
+        unsafe { MaybeUninit::zeroed().assume_init() }
+    }
+    pub fn create_mapping(
+        &mut self,
+        virt_start: u64,
+        virt_end: u64,
+        phys: u64,
+        attr: PageAttr,
+    ) -> Result<()> {
+        if virt_start & ATTR_MASK != 0 {
+            return Err("invalid virt_start");
+        }
+        if virt_end & ATTR_MASK != 0 {
+            return Err("invalid virt_end");
+        }
+        if phys & ATTR_MASK != 0 {
+            return Err("invalid phys");
+        }
+        for addr in (virt_start..virt_end).step_by(PAGE_SIZE) {
+            let index = self.calc_index(addr);
+            let table = self.entry[index].ensure_populated()?.table_mut()?;
+            let index = table.calc_index(addr);
+            let table = table.entry[index].ensure_populated()?.table_mut()?;
+            let index = table.calc_index(addr);
+            let table = table.entry[index].ensure_populated()?.table_mut()?;
+            let index = table.calc_index(addr);
+            let pte = &mut table.entry[index];
+            pte.set_page(phys + addr - virt_start, attr)?;
+        }
+        Ok(())
+    }
+}
 
 pub unsafe fn write_es(selector: u16) {
     asm!("mov es, ax", in("ax") selector)
@@ -778,4 +845,15 @@ const _: () = assert!(size_of::<TaskStateSegment64Descriptor>() == 16);
 
 pub fn trigger_debug_interrupt() {
     unsafe { asm!("int3") }
+}
+
+#[no_mangle]
+pub unsafe fn write_cr3(table: *const PML4) {
+    asm!("mov cr3, rax", in("rax") table);
+}
+
+pub fn flush_tlb() {
+    unsafe {
+        write_cr3(read_cr3());
+    }
 }

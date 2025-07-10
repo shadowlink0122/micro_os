@@ -10,6 +10,7 @@ use micro_os::graphics::fill_rect;
 use micro_os::graphics::Bitmap;
 use micro_os::info;
 use micro_os::init::init_basic_runtime;
+use micro_os::init::init_paging;
 use micro_os::println;
 use micro_os::qemu::exit_qemu;
 use micro_os::qemu::QemuExitCode;
@@ -19,9 +20,12 @@ use micro_os::uefi::EfiMemoryType;
 use micro_os::uefi::EfiSystemTable;
 use micro_os::uefi::VramTextWriter;
 use micro_os::warn;
+use micro_os::x86::flush_tlb;
 use micro_os::x86::hlt;
 use micro_os::x86::init_exceptions;
+use micro_os::x86::read_cr3;
 use micro_os::x86::trigger_debug_interrupt;
+use micro_os::x86::PageAttr;
 
 #[no_mangle]
 fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
@@ -78,6 +82,17 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     info!("Exception initialized!");
     trigger_debug_interrupt();
     info!("Exception continued.");
+
+    init_paging(&memory_map);
+    info!("Now we are using our own page tables!");
+
+    let page_table = read_cr3();
+    unsafe {
+        (*page_table)
+            .create_mapping(0, 4096, 0, PageAttr::NotPresent)
+            .expect("Failed to unmap page 0")
+    };
+    flush_tlb();
 
     loop {
         hlt();
