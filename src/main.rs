@@ -6,6 +6,10 @@ use core::panic::PanicInfo;
 use core::writeln;
 
 use micro_os::error;
+use micro_os::executor;
+use micro_os::executor::block_on;
+use micro_os::executor::Executor;
+use micro_os::executor::Task;
 use micro_os::graphics::fill_rect;
 use micro_os::graphics::Bitmap;
 use micro_os::info;
@@ -94,9 +98,18 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     };
     flush_tlb();
 
-    loop {
-        hlt();
-    }
+    let task = Task::new(async {
+        info!("Hello from the async Wrold!");
+        Ok(())
+    });
+
+    let mut executor = Executor::new();
+    executor.enqueue(task);
+    Executor::run(executor)
+
+    // loop {
+    //     hlt();
+    // }
 }
 
 #[panic_handler]
