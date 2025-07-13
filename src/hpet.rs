@@ -1,0 +1,82 @@
+use core::mem::size_of;
+use core::ptr::read_volatile;
+use core::ptr::write_volatile;
+
+const TIMER_CONFIG_LEVEL_TRIGGER: u64 = 1 << 1;
+const TIMER_CONFIG_INT_ENABLE: u64 = 1 << 2;
+const TIMER_CONFIG_USE_PREODIC_MODE: u64 = 1 << 3;
+
+#[repr(C)]
+struct TimerResigter {
+    configuration_and_capability: u64,
+    _reserved: [u64; 3],
+}
+const _: () = assert!(size_of::<TimerResigter>() == 0x20);
+
+impl TimerResigter {
+    unsafe fn write_config(&mut self, config: u64) {
+        write_volatile(&mut self.configuration_and_capability, config);
+    }
+}
+
+#[repr(C)]
+pub struct HpetRegisters {
+    capability_and_id: u64,
+    _reserved0: u64,
+    configuration: u64,
+    _reserved1: [u64; 27],
+    main_counter_value: u64,
+    _reserved2: u64,
+    timers: [TimerResigter; 32],
+}
+const _: () = assert!(size_of::<HpetRegisters>() == 0x500);
+
+pub struct Hpet {
+    registers: &'static mut HpetRegisters,
+    #[allow(unused)]
+    num_of_timers: usize,
+    freq: u64,
+}
+
+impl Hpet {
+    pub fn new(registers: &'static mut HpetRegisters) -> Self {
+        let fs_per_count = registers.capability_and_id >> 32;
+        let num_of_timers = ((registers.capability_and_id >> 8) & 0b1_1111) as usize + 1;
+        let freq = 1_000_000_000_000_000 / fs_per_count;
+
+        let mut hpet = Self {
+            registers,
+            num_of_timers,
+            freq,
+        };
+        unsafe {
+            hpet.globall_disable();
+            for i in 0..hpet.num_of_timers {
+                let timer = &mut hpet.registers.timers[i];
+                let mut config = read_volatile(&timer.configuration_and_capability);
+                config &= !(TIMER_CONFIG_INT_ENABLE
+                    | TIMER_CONFIG_USE_PREODIC_MODE
+                    | TIMER_CONFIG_LEVEL_TRIGGER
+                    | (0b1_1111 << 9));
+                timer.write_config(config);
+            }
+            write_volatile(&mut hpet.registers.main_counter_value, 0);
+            hpet.global_enable();
+        }
+        hpet
+    }
+    unsafe fn globall_disable(&mut self) {
+        let config = read_volatile(&self.registers.configuration) & !0b11;
+        write_volatile(&mut self.registers.configuration, config);
+    }
+    unsafe fn global_enable(&mut self) {
+        let config = read_volatile(&self.registers.configuration) | 0b01;
+        write_volatile(&mut self.registers.configuration, config);
+    }
+    pub fn main_counter(&self) -> u64 {
+        unsafe { read_volatile(&self.registers.main_counter_value) }
+    }
+    pub fn freq(&self) -> u64 {
+        self.freq
+    }
+}

@@ -1,18 +1,18 @@
 #![no_std]
 #![no_main]
 #![feature(offset_of)]
+extern crate alloc;
 use core::fmt::Write;
 use core::panic::PanicInfo;
 use core::writeln;
 
 use micro_os::error;
-use micro_os::executor;
-use micro_os::executor::block_on;
 use micro_os::executor::yield_execution;
 use micro_os::executor::Executor;
 use micro_os::executor::Task;
 use micro_os::graphics::fill_rect;
 use micro_os::graphics::Bitmap;
+use micro_os::hpet::Hpet;
 use micro_os::info;
 use micro_os::init::init_basic_runtime;
 use micro_os::init::init_paging;
@@ -40,6 +40,10 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     fill_rect(&mut vram, 0x0000ff, 0, 0, vw, vh).expect("fill_rect failed");
 
     let mut w = VramTextWriter::new(&mut vram);
+
+    let acpi = efi_system_table
+        .acpi_table()
+        .expect("Failed to get ACPI table");
 
     println!("Booting micro_os...");
     println!("image_handle: {:#018X}", image_handle);
@@ -99,21 +103,34 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     };
     flush_tlb();
 
+    let hpet = acpi.hpet().expect("Failed to get HPET from ACPI");
+    let hpet = hpet
+        .base_address()
+        .expect("Failed to get HPET base address");
+    use alloc::sync::Arc;
+
     let task = Task::new(async {
         info!("Hello from the async Wrold!");
         yield_execution().await;
         Ok(())
     });
-    let task2 = Task::new(async {
-        for i in 0..=3 {
-            info!("{i}");
-            yield_execution().await;
+
+    let hpet1 = Arc::new(Hpet::new(hpet));
+    let hpet2 = hpet1.clone();
+
+    let task2 = Task::new({
+        async move {
+            for i in 0..=3 {
+                info!("{i}:{}", hpet1.main_counter());
+                yield_execution().await;
+            }
+            Ok(())
         }
-        Ok(())
     });
-    let task3 = Task::new(async {
+
+    let task3 = Task::new(async move {
         for i in 100..=103 {
-            info!("{i}");
+            info!("{i}:{}", hpet2.main_counter());
             yield_execution().await;
         }
         Ok(())

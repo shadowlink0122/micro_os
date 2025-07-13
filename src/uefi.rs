@@ -1,3 +1,4 @@
+use crate::acpi::AcpiRsdpStruct;
 use crate::graphics::draw_font_fg;
 use crate::graphics::Bitmap;
 use crate::result::Result;
@@ -17,6 +18,13 @@ struct EfiGuid {
     pub data2: u16,
     pub data3: [u8; 8],
 }
+
+const EFI_ACPI_TABLE_GUID: EfiGuid = EfiGuid {
+    data0: 0x8868e871,
+    data1: 0xe4f1,
+    data2: 0x11d3,
+    data3: [0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81],
+};
 
 const EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID: EfiGuid = EfiGuid {
     data0: 0x9042a9de,
@@ -175,15 +183,37 @@ const _: () = assert!(offset_of!(EfiBootServiciesTable, exit_boot_service) == 23
 const _: () = assert!(offset_of!(EfiBootServiciesTable, locate_protocol) == 320);
 
 #[repr(C)]
+#[derive(Debug)]
+pub struct EfiConfigurationTable {
+    vendor_guid: EfiGuid,
+    pub vendor_table: *const u8,
+}
+
+#[repr(C)]
 pub struct EfiSystemTable {
     _reserved0: [u64; 12],
     pub boot_servicies: &'static EfiBootServiciesTable,
+    number_of_table_entries: usize,
+    configuration_table: *const EfiConfigurationTable,
 }
 const _: () = assert!(offset_of!(EfiSystemTable, boot_servicies) == 96);
 
 impl EfiSystemTable {
     pub fn boot_servicies(&self) -> &EfiBootServiciesTable {
         self.boot_servicies
+    }
+    fn lookup_config_table(&self, guid: &EfiGuid) -> Option<&EfiConfigurationTable> {
+        for i in 0..self.number_of_table_entries {
+            let ct = unsafe { &*self.configuration_table.add(i) };
+            if ct.vendor_guid == *guid {
+                return Some(ct);
+            }
+        }
+        None
+    }
+    pub fn acpi_table(&self) -> Option<&'static AcpiRsdpStruct> {
+        self.lookup_config_table(&EFI_ACPI_TABLE_GUID)
+            .map(|t| unsafe { &*(t.vendor_table as *const AcpiRsdpStruct) })
     }
 }
 
