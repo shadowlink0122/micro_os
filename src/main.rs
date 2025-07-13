@@ -8,6 +8,7 @@ use core::writeln;
 use micro_os::error;
 use micro_os::executor;
 use micro_os::executor::block_on;
+use micro_os::executor::yield_execution;
 use micro_os::executor::Executor;
 use micro_os::executor::Task;
 use micro_os::graphics::fill_rect;
@@ -100,11 +101,28 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
 
     let task = Task::new(async {
         info!("Hello from the async Wrold!");
+        yield_execution().await;
+        Ok(())
+    });
+    let task2 = Task::new(async {
+        for i in 0..=3 {
+            info!("{i}");
+            yield_execution().await;
+        }
+        Ok(())
+    });
+    let task3 = Task::new(async {
+        for i in 100..=103 {
+            info!("{i}");
+            yield_execution().await;
+        }
         Ok(())
     });
 
     let mut executor = Executor::new();
     executor.enqueue(task);
+    executor.enqueue(task2);
+    executor.enqueue(task3);
     Executor::run(executor)
 
     // loop {
