@@ -8,9 +8,10 @@ rustでOSを自作してみる
 # やったこと
 
 ## Rust 
-- Hello World
-- Memory Mapを表示
-- メモリアロケータ
+1. Hello World
+2. Memory Mapを表示
+3. メモリアロケータ
+4. 非同期処理
 
 ## C++
 - Hello World
