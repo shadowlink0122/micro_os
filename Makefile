@@ -39,6 +39,7 @@ test_cpp:
 # run efi image on qemu
 run:
 	qemu-system-x86_64 -m 2G -machine q35 -bios third-party/ovmf/RELEASEX64_OVMF.fd \
+	-monitor telnet:0.0.0.0:2345,server,nowait,logfile=log/qemu_monitor.txt \
     -drive format=raw,file=fat:rw:mnt \
     -chardev stdio,id=char_com1,mux=on,logfile=log/com1.txt \
     -serial chardev:char_com1 \
