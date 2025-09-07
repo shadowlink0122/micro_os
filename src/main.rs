@@ -4,6 +4,7 @@
 extern crate alloc;
 use core::panic::PanicInfo;
 use core::time::Duration;
+use micro_os::error;
 use micro_os::executor::Executor;
 use micro_os::executor::Task;
 use micro_os::executor::TimeoutFuture;
@@ -19,7 +20,9 @@ use micro_os::print::set_global_vram;
 use micro_os::println;
 use micro_os::qemu::exit_qemu;
 use micro_os::qemu::QemuExitCode;
+use micro_os::serial::SerialPort;
 use micro_os::uefi::init_vram;
+use micro_os::uefi::locate_loaded_image_protocol;
 use micro_os::uefi::EfiHandle;
 use micro_os::uefi::EfiSystemTable;
 use micro_os::x86::init_exceptions;
@@ -77,10 +80,27 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
         Ok(())
     });
 
+    let serial_task = Task::new(async {
+        let sp = SerialPort::default();
+        if let Err(e) = sp.loopback_test() {
+            error!("{e:?}");
+            return Err("serial: loopback test failed");
+        }
+        info!("Started to minitor serial port");
+        loop {
+            if let Some(v) = sp.try_read() {
+                let c = core::char::from_u32(v as u32);
+                info!("serial input: {v:#04X} = {c:?}");
+            }
+            TimeoutFuture::new(Duration::from_millis(20)).await;
+        }
+    });
+
     let mut executor = Executor::new();
     executor.enqueue(task1);
     executor.enqueue(task2);
     executor.enqueue(task3);
+    executor.enqueue(serial_task);
     Executor::run(executor)
 
     // loop {
