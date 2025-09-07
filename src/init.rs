@@ -85,3 +85,15 @@ pub fn init_display(vram: &mut VramBufferInfo) {
     let vh = vram.height();
     fill_rect(vram, 0x0000ff, 0, 0, vm, vh).expect("fill_rect failed");
 }
+
+pub fn init_pci(acpi: &AcpiRsdpStruct) {
+    info!("Initializing PCI...");
+    if let Some(mcfg) = acpi.mcfg() {
+        info!("Number of entries: {}", mcfg.num_of_entries());
+        for i in 0..mcfg.num_of_entries() {
+            if let Some(e) = mcfg.entry(i) {
+                info!("{}", e);
+            }
+        }
+    }
+}

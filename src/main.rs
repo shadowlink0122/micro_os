@@ -15,6 +15,7 @@ use micro_os::init::init_basic_runtime;
 use micro_os::init::init_display;
 use micro_os::init::init_hpet;
 use micro_os::init::init_paging;
+use micro_os::init::init_pci;
 use micro_os::print::hexdump;
 use micro_os::print::set_global_vram;
 use micro_os::println;
@@ -22,7 +23,6 @@ use micro_os::qemu::exit_qemu;
 use micro_os::qemu::QemuExitCode;
 use micro_os::serial::SerialPort;
 use micro_os::uefi::init_vram;
-use micro_os::uefi::locate_loaded_image_protocol;
 use micro_os::uefi::EfiHandle;
 use micro_os::uefi::EfiSystemTable;
 use micro_os::x86::init_exceptions;
@@ -54,6 +54,7 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     let (_gdt, _idt) = init_exceptions();
     init_paging(&memory_map);
     init_hpet(acpi);
+    init_pci(acpi);
     let t0 = global_timestamp();
 
     let task1 = Task::new(async move {
